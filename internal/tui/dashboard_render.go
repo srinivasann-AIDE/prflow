@@ -356,25 +356,71 @@ func (m dashModel) renderPRCard(pr cache.CachedPR, selected bool, width int) str
 
 	line1 := fmt.Sprintf("%s  %s  %s", repoStr, numStr, titleStr)
 
-	// Line 2: status badge + time + stale reviewer indicator
+	// Line 2: status badge + time + section-specific context
 	badge := m.prBadge(pr)
 	timeAgo := ""
 	if pr.UpdatedAt != "" {
 		timeAgo = wsMetaStyle.Render(fmt.Sprintf("  updated %s", formatTimeAgo(pr.UpdatedAt)))
 	}
 
-	// Add stale reviewer indicator (using configured stale threshold)
-	staleIndicator := ""
 	staleDays := config.ParseStaleThresholdDays(m.cfg.Settings.StaleThreshold)
-	reviewerStatuses := CalculateReviewerStatus(&pr.PR)
-	if len(reviewerStatuses) > 0 {
-		stalest := reviewerStatuses[0] // already sorted by wait time descending
-		if stalest.WaitDays >= staleDays {
-			staleIndicator = wsBehindStyle.Render(fmt.Sprintf("  ⏰ @%s (%dd)", stalest.Login, stalest.WaitDays))
+	var contextStr string
+	switch pr.Section {
+	case "waiting":
+		// Show stalest reviewer and their wait time
+		reviewerStatuses := CalculateReviewerStatus(&pr.PR)
+		if len(reviewerStatuses) > 0 {
+			stalest := reviewerStatuses[0]
+			if stalest.WaitDays >= staleDays {
+				contextStr = wsBehindStyle.Render(fmt.Sprintf("  ⏰ @%s (%dd)", stalest.Login, stalest.WaitDays))
+			} else if stalest.IsPending {
+				contextStr = wsMetaStyle.Render(fmt.Sprintf("  ⏳ @%s waiting %dd", stalest.Login, stalest.WaitDays))
+			}
 		}
+	case "do_now":
+		// Show the specific reason action is needed
+		switch {
+		case pr.Mergeable == "CONFLICTING":
+			contextStr = wsBehindStyle.Render("  ✗ merge conflict")
+		case pr.ReviewDecision == "CHANGES_REQUESTED":
+			// show who requested changes
+			for _, rev := range pr.Reviews.Nodes {
+				if rev.State == "CHANGES_REQUESTED" {
+					contextStr = wsBehindStyle.Render(fmt.Sprintf("  ✗ changes requested by @%s", rev.Author.Login))
+					break
+				}
+			}
+			if contextStr == "" {
+				contextStr = wsBehindStyle.Render("  ✗ changes requested")
+			}
+		case pr.ReviewDecision == "APPROVED":
+			contextStr = wsCleanStyle.Render("  ✓ approved — ready to merge")
+		default:
+			// CI failure
+			for _, check := range pr.StatusCheckRollup {
+				if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "ACTION_REQUIRED" {
+					contextStr = wsBehindStyle.Render(fmt.Sprintf("  ✗ CI: %s", check.Name))
+					break
+				}
+			}
+		}
+	case "review":
+		// Show how long the author has been waiting for your review.
+		// Use updatedAt if available (more recent activity), else createdAt.
+		waitDays := DaysSinceUpdate(pr.UpdatedAt)
+		if pr.UpdatedAt == "" {
+			waitDays = DaysSinceUpdate(pr.CreatedAt)
+		}
+		if waitDays >= staleDays {
+			contextStr = wsBehindStyle.Render(fmt.Sprintf("  ⏰ @%s waiting %dd for review", pr.Author.Login, waitDays))
+		} else {
+			contextStr = wsMetaStyle.Render(fmt.Sprintf("  by @%s", pr.Author.Login))
+		}
+	case "needs_attention":
+		contextStr = wsDirtyStyle.Render(fmt.Sprintf("  ↺ updated after your review %s", formatTimeAgo(pr.UpdatedAt)))
 	}
 
-	line2 := badge + timeAgo + staleIndicator
+	line2 := badge + timeAgo + contextStr
 
 	content := line1 + "\n" + line2
 

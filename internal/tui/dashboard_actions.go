@@ -10,6 +10,61 @@ import (
 	"github.com/nagarjun226/prflow/internal/gh"
 )
 
+// linkWorkspacePRs cross-references local workspace branches against open PRs.
+// Populates RepoStatus.LinkedPR so the Workspace tab shows which PR a branch belongs to.
+func (m *dashModel) linkWorkspacePRs() {
+	if len(m.workspace) == 0 {
+		return
+	}
+	// Build branch→PR map from all sections
+	type prRef struct {
+		number   int
+		section  string
+		decision string
+	}
+	branchMap := make(map[string]prRef) // "org/repo:branch" -> prRef
+	allPRs := make([]cache.CachedPR, 0, len(m.doNow)+len(m.waiting)+len(m.review)+len(m.needsAttention))
+	allPRs = append(allPRs, m.doNow...)
+	allPRs = append(allPRs, m.waiting...)
+	allPRs = append(allPRs, m.review...)
+	allPRs = append(allPRs, m.needsAttention...)
+	for _, pr := range allPRs {
+		if pr.HeadRefName == "" {
+			continue
+		}
+		key := pr.Repo + ":" + pr.HeadRefName
+		branchMap[key] = prRef{number: pr.Number, section: pr.Section, decision: pr.ReviewDecision}
+	}
+
+	for i := range m.workspace {
+		ws := &m.workspace[i]
+		key := ws.Name + ":" + ws.Branch
+		if ref, ok := branchMap[key]; ok {
+			label := fmt.Sprintf("#%d", ref.number)
+			switch ref.section {
+			case "do_now":
+				switch ref.decision {
+				case "APPROVED":
+					label += " (approved — merge!)"
+				case "CHANGES_REQUESTED":
+					label += " (changes requested)"
+				default:
+					label += " (needs action)"
+				}
+			case "waiting":
+				label += " (waiting for review)"
+			case "review":
+				label += " (review requested)"
+			case "needs_attention":
+				label += " (needs re-review)"
+			}
+			ws.LinkedPR = label
+		} else {
+			ws.LinkedPR = ""
+		}
+	}
+}
+
 func (m *dashModel) openDetail() (tea.Model, tea.Cmd) {
 	var pr *cache.CachedPR
 	switch m.section {

@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -325,6 +326,35 @@ func (d *DB) CanNudge(repo string, prNumber int, reviewer string, cooldownHours 
 		return true
 	}
 	return time.Since(t) >= time.Duration(cooldownHours)*time.Hour
+}
+
+// PurgeClosedPRs deletes cache rows for PRs not in the given set of open "repo#number" keys.
+// Call this after a full sync so stale closed/merged PRs don't linger in the cache.
+func (d *DB) PurgeClosedPRs(openKeys map[string]bool) error {
+	rows, err := d.db.Query(`SELECT repo, number FROM prs`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var toDelete [][2]interface{}
+	for rows.Next() {
+		var repo string
+		var number int
+		if err := rows.Scan(&repo, &number); err != nil {
+			continue
+		}
+		key := fmt.Sprintf("%s#%d", repo, number)
+		if !openKeys[key] {
+			toDelete = append(toDelete, [2]interface{}{repo, number})
+		}
+	}
+	rows.Close()
+
+	for _, pair := range toDelete {
+		d.db.Exec(`DELETE FROM prs WHERE repo = ? AND number = ?`, pair[0], pair[1])
+	}
+	return nil
 }
 
 // OpenTestDB creates a temporary in-memory DB for testing from other packages.

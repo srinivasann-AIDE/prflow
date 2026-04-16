@@ -91,9 +91,9 @@ type dashModel struct {
 	deleteStalePending bool // true when waiting for 'd' confirmation
 
 	// Nudge state
-	nudgePending   bool   // true when waiting for confirmation
-	nudgeReviewer  string // reviewer login to nudge
-	nudgeWaitDays  int    // days waiting
+	nudgePending  bool   // true when waiting for confirmation
+	nudgeReviewer string // reviewer login to nudge
+	nudgeWaitDays int    // days waiting
 
 	// State
 	loading    bool
@@ -201,7 +201,6 @@ func (m dashModel) Init() tea.Cmd {
 		syncPRs(m.db, m.cfg, m.username),
 		scanWorkspace(m.cfg),
 		dashTickCmd(),
-		startAutoRefreshTimer(m.cfg.Settings.RefreshInterval),
 	)
 }
 
@@ -571,19 +570,6 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case autoRefreshMsg:
-		// Background auto-refresh - only if not already loading
-		if !m.loading && m.viewMode == viewList {
-			m.loading = true
-			return m, tea.Batch(
-				syncPRs(m.db, m.cfg, m.username),
-				scanWorkspace(m.cfg),
-				startAutoRefreshTimer(m.cfg.Settings.RefreshInterval),
-			)
-		}
-		// If already loading or in detail view, just restart timer
-		return m, startAutoRefreshTimer(m.cfg.Settings.RefreshInterval)
-
 	case syncDoneMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -595,10 +581,14 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.needsAttention = msg.needsAttention
 			m.lastSync = time.Now()
 			m.err = ""
+			// Link workspace repos to their open PRs by branch name
+			m.linkWorkspacePRs()
 		}
 
 	case workspaceScanMsg:
 		m.workspace = msg.repos
+		// Re-link after workspace scan (PRs may already be loaded)
+		m.linkWorkspacePRs()
 
 	case detailLoadedMsg:
 		if msg.err != nil {

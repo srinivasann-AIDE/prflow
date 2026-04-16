@@ -56,23 +56,23 @@ func CheckAuth() (string, error) {
 
 // PR represents a pull request
 type PR struct {
-	Number         int      `json:"number"`
-	Title          string   `json:"title"`
-	State          string   `json:"state"`
-	URL            string   `json:"url"`
-	HeadRefName    string   `json:"headRefName"`
-	BaseRefName    string   `json:"baseRefName"`
-	Author         Author   `json:"author"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	ReviewDecision string   `json:"reviewDecision"`
-	Mergeable      string   `json:"mergeable"`
-	IsDraft        bool     `json:"isDraft"`
-	Repository     RepoRef  `json:"repository"`
-	Reviews        Reviews  `json:"reviews"`
-	ReviewRequests ReviewRequests `json:"reviewRequests"`
-	StatusCheckRollup []StatusCheck `json:"statusCheckRollup"`
-	Comments       Comments `json:"comments"`
+	Number            int            `json:"number"`
+	Title             string         `json:"title"`
+	State             string         `json:"state"`
+	URL               string         `json:"url"`
+	HeadRefName       string         `json:"headRefName"`
+	BaseRefName       string         `json:"baseRefName"`
+	Author            Author         `json:"author"`
+	CreatedAt         string         `json:"createdAt"`
+	UpdatedAt         string         `json:"updatedAt"`
+	ReviewDecision    string         `json:"reviewDecision"`
+	Mergeable         string         `json:"mergeable"`
+	IsDraft           bool           `json:"isDraft"`
+	Repository        RepoRef        `json:"repository"`
+	Reviews           Reviews        `json:"reviews"`
+	ReviewRequests    ReviewRequests `json:"reviewRequests"`
+	StatusCheckRollup []StatusCheck  `json:"statusCheckRollup"`
+	Comments          Comments       `json:"comments"`
 }
 
 type Author struct {
@@ -177,10 +177,10 @@ type Comment struct {
 
 // ReviewThread from GraphQL
 type ReviewThread struct {
-	ID         string `json:"id"`
-	Path       string `json:"path"`
-	Line       int    `json:"line"`
-	IsResolved bool   `json:"isResolved"`
+	ID         string          `json:"id"`
+	Path       string          `json:"path"`
+	Line       int             `json:"line"`
+	IsResolved bool            `json:"isResolved"`
 	Comments   []ThreadComment `json:"comments"`
 }
 
@@ -205,12 +205,12 @@ func SearchMyPRs() ([]PR, error) {
 		return searchPRsViaAPI("author:@me")
 	}
 	var results []struct {
-		Number     int    `json:"number"`
-		Title      string `json:"title"`
-		State      string `json:"state"`
-		URL        string `json:"url"`
-		CreatedAt  string `json:"createdAt"`
-		UpdatedAt  string `json:"updatedAt"`
+		Number     int     `json:"number"`
+		Title      string  `json:"title"`
+		State      string  `json:"state"`
+		URL        string  `json:"url"`
+		CreatedAt  string  `json:"createdAt"`
+		UpdatedAt  string  `json:"updatedAt"`
 		Repository RepoRef `json:"repository"`
 	}
 	if err := json.Unmarshal([]byte(out), &results); err != nil {
@@ -220,12 +220,12 @@ func SearchMyPRs() ([]PR, error) {
 	var prs []PR
 	for _, r := range results {
 		prs = append(prs, PR{
-			Number:    r.Number,
-			Title:     r.Title,
-			State:     r.State,
-			URL:       r.URL,
-			CreatedAt: r.CreatedAt,
-			UpdatedAt: r.UpdatedAt,
+			Number:     r.Number,
+			Title:      r.Title,
+			State:      r.State,
+			URL:        r.URL,
+			CreatedAt:  r.CreatedAt,
+			UpdatedAt:  r.UpdatedAt,
 			Repository: r.Repository,
 		})
 	}
@@ -244,12 +244,12 @@ func SearchReviewRequests() ([]PR, error) {
 		return searchPRsViaAPI("review-requested:@me")
 	}
 	var results []struct {
-		Number     int    `json:"number"`
-		Title      string `json:"title"`
-		State      string `json:"state"`
-		URL        string `json:"url"`
-		CreatedAt  string `json:"createdAt"`
-		UpdatedAt  string `json:"updatedAt"`
+		Number     int     `json:"number"`
+		Title      string  `json:"title"`
+		State      string  `json:"state"`
+		URL        string  `json:"url"`
+		CreatedAt  string  `json:"createdAt"`
+		UpdatedAt  string  `json:"updatedAt"`
 		Repository RepoRef `json:"repository"`
 	}
 	if err := json.Unmarshal([]byte(out), &results); err != nil {
@@ -259,12 +259,12 @@ func SearchReviewRequests() ([]PR, error) {
 	var prs []PR
 	for _, r := range results {
 		prs = append(prs, PR{
-			Number:    r.Number,
-			Title:     r.Title,
-			State:     r.State,
-			URL:       r.URL,
-			CreatedAt: r.CreatedAt,
-			UpdatedAt: r.UpdatedAt,
+			Number:     r.Number,
+			Title:      r.Title,
+			State:      r.State,
+			URL:        r.URL,
+			CreatedAt:  r.CreatedAt,
+			UpdatedAt:  r.UpdatedAt,
 			Repository: r.Repository,
 		})
 	}
@@ -312,12 +312,12 @@ func searchPRsViaAPI(qualifier string) ([]PR, error) {
 			repoName = parts[1]
 		}
 		prs = append(prs, PR{
-			Number:    item.Number,
-			Title:     item.Title,
-			State:     item.State,
-			URL:       item.HTMLURL,
-			CreatedAt: item.CreatedAt,
-			UpdatedAt: item.UpdatedAt,
+			Number:     item.Number,
+			Title:      item.Title,
+			State:      item.State,
+			URL:        item.HTMLURL,
+			CreatedAt:  item.CreatedAt,
+			UpdatedAt:  item.UpdatedAt,
 			Repository: RepoRef{NameWithOwner: repoName},
 		})
 	}
@@ -329,7 +329,7 @@ func ListPRsForRepo(repo string) ([]PR, error) {
 	out, err := run("pr", "list",
 		"-R", repo,
 		"--state", "open",
-		"--json", "number,title,state,url,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,isDraft",
+		"--json", "number,title,state,url,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,mergeable,isDraft,reviews,reviewRequests,statusCheckRollup",
 		"--limit", "50",
 	)
 	if err != nil {
@@ -564,12 +564,12 @@ func SearchReviewedPRs() ([]PR, error) {
 	var prs []PR
 	for _, r := range results {
 		prs = append(prs, PR{
-			Number:    r.Number,
-			Title:     r.Title,
-			State:     r.State,
-			URL:       r.URL,
-			CreatedAt: r.CreatedAt,
-			UpdatedAt: r.UpdatedAt,
+			Number:     r.Number,
+			Title:      r.Title,
+			State:      r.State,
+			URL:        r.URL,
+			CreatedAt:  r.CreatedAt,
+			UpdatedAt:  r.UpdatedAt,
 			Repository: r.Repository,
 		})
 	}
@@ -608,7 +608,7 @@ func ApprovePR(repo string, number int, body string) error {
 // strategy can be: "merge" (default), "squash", or "rebase"
 func MergePR(repo string, number int, strategy string, autoMerge bool) error {
 	args := []string{"pr", "merge", fmt.Sprintf("%d", number), "-R", repo}
-	
+
 	switch strategy {
 	case "squash":
 		args = append(args, "--squash")
@@ -617,11 +617,11 @@ func MergePR(repo string, number int, strategy string, autoMerge bool) error {
 	default:
 		args = append(args, "--merge")
 	}
-	
+
 	if autoMerge {
 		args = append(args, "--auto")
 	}
-	
+
 	_, err := run(args...)
 	return err
 }
@@ -636,7 +636,7 @@ func ResolveThread(threadID string) error {
 			}
 		}
 	}`
-	
+
 	_, err := run("api", "graphql", "-F", fmt.Sprintf("threadId=%s", threadID), "-f", fmt.Sprintf("query=%s", query))
 	return err
 }
@@ -651,7 +651,7 @@ func UnresolveThread(threadID string) error {
 			}
 		}
 	}`
-	
+
 	_, err := run("api", "graphql", "-F", fmt.Sprintf("threadId=%s", threadID), "-f", fmt.Sprintf("query=%s", query))
 	return err
 }
@@ -667,12 +667,12 @@ func ReplyToComment(repo string, prNumber int, commentID string, body string) er
 			}
 		}
 	}`, repoOwner(repo), repoName(repo), prNumber)
-	
+
 	prIDOut, err := run("api", "graphql", "-f", fmt.Sprintf("query=%s", prIDQuery))
 	if err != nil {
 		return fmt.Errorf("failed to get PR ID: %w", err)
 	}
-	
+
 	// Extract PR ID from JSON response
 	var prIDResp struct {
 		Data struct {
@@ -687,7 +687,7 @@ func ReplyToComment(repo string, prNumber int, commentID string, body string) er
 		return fmt.Errorf("failed to parse PR ID: %w", err)
 	}
 	prID := prIDResp.Data.Repository.PullRequest.ID
-	
+
 	// Now add the reply using the comment ID and PR ID
 	mutation := `mutation($pullRequestId: ID!, $pullRequestReviewThreadId: ID!, $body: String!) {
 		addPullRequestReviewThreadReply(input: {
@@ -701,13 +701,13 @@ func ReplyToComment(repo string, prNumber int, commentID string, body string) er
 			}
 		}
 	}`
-	
+
 	_, err = run("api", "graphql",
 		"-f", fmt.Sprintf("query=%s", mutation),
 		"-F", fmt.Sprintf("pullRequestId=%s", prID),
 		"-F", fmt.Sprintf("pullRequestReviewThreadId=%s", commentID),
 		"-F", fmt.Sprintf("body=%s", body))
-	
+
 	return err
 }
 

@@ -91,38 +91,30 @@ func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 				pr := &res.prs[i]
 				key := fmt.Sprintf("%s#%d", res.repo, pr.Number)
 				allRepoPRs[key] = *pr
-				if seenPRs[key] {
-					continue
-				}
-				seenPRs[key] = true
 
 				// Check if this is my PR: either from search results or by username match
 				isMyPR := myPRKeys[key] || strings.EqualFold(pr.Author.Login, username)
 
-				cached := cache.CachedPR{
-					PR:   *pr,
-					Repo: res.repo,
-				}
-
 				if isMyPR {
-					switch {
-					case pr.ReviewDecision == "CHANGES_REQUESTED":
-						cached.Section = "do_now"
+					if seenPRs[key] {
+						continue
+					}
+					seenPRs[key] = true
+					section := classifyMyPR(pr)
+					cached := cache.CachedPR{
+						PR:      *pr,
+						Repo:    res.repo,
+						Section: section,
+					}
+					if section == "do_now" {
 						doNow = append(doNow, cached)
-					case pr.ReviewDecision == "APPROVED":
-						cached.Section = "do_now"
-						doNow = append(doNow, cached)
-					case pr.Mergeable == "CONFLICTING":
-						cached.Section = "do_now"
-						doNow = append(doNow, cached)
-					default:
-						cached.Section = "waiting"
+					} else {
 						waiting = append(waiting, cached)
 					}
+					db.UpsertPR(pr, res.repo, section)
 				}
-				// Non-authored PRs will be caught by review requests below
-
-				db.UpsertPR(pr, res.repo, cached.Section)
+				// Non-authored PRs are NOT marked seen here — they'll be classified
+				// into "review" or "needs_attention" in Steps 3/4 below.
 			}
 		}
 
@@ -203,7 +195,11 @@ func syncPRs(db *cache.DB, cfg *config.Config, username string) tea.Cmd {
 			}
 		}
 
-		// Step 5: Sort each section by urgency (not just updated_at)
+		// Step 5: Purge closed/merged PRs from the cache so stale rows don't
+		// persist across syncs (e.g. a PR merged on GitHub still showing in ls).
+		db.PurgeClosedPRs(seenPRs)
+
+		// Step 6: Sort each section by urgency (not just updated_at)
 		staleDays := config.ParseStaleThresholdDays(cfg.Settings.StaleThreshold)
 		SortByUrgency(doNow, staleDays)
 		SortByUrgency(waiting, staleDays)
@@ -261,6 +257,52 @@ func needsReReview(pr *gh.PR, username string) bool {
 
 	// If PR updated after my review (with 1-minute buffer to avoid false positives)
 	return prUpdated.After(myLastReview.Add(1 * time.Minute))
+}
+
+// classifyMyPR determines do_now vs waiting for a PR I authored.
+// Requires rich fields: reviewDecision, mergeable, statusCheckRollup, isDraft.
+func classifyMyPR(pr *gh.PR) string {
+	// Drafts never need action from the author — always waiting
+	if pr.IsDraft {
+		return "waiting"
+	}
+
+	// Changes requested — author must act
+	if pr.ReviewDecision == "CHANGES_REQUESTED" {
+		return "do_now"
+	}
+
+	// Merge conflicts — author must rebase/resolve
+	if pr.Mergeable == "CONFLICTING" {
+		return "do_now"
+	}
+
+	// CI failing — author must fix
+	for _, check := range pr.StatusCheckRollup {
+		if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "ACTION_REQUIRED" {
+			return "do_now"
+		}
+	}
+
+	// Approved + CI passing (or no CI) — ready to merge, author should act
+	if pr.ReviewDecision == "APPROVED" {
+		ciOK := true
+		for _, check := range pr.StatusCheckRollup {
+			if check.Conclusion != "SUCCESS" && check.Conclusion != "NEUTRAL" &&
+				check.Conclusion != "SKIPPED" && check.Status != "COMPLETED" {
+				ciOK = false
+				break
+			}
+		}
+		if ciOK {
+			return "do_now"
+		}
+		// Approved but CI still running or failing — stay in waiting
+		return "waiting"
+	}
+
+	// Everything else: waiting on reviewers
+	return "waiting"
 }
 
 func scanWorkspace(cfg *config.Config) tea.Cmd {

@@ -85,7 +85,12 @@ func runSync() error {
 	defer db.Close()
 
 	username, _ := gh.CheckAuth()
+	return syncToCache(db, cfg, username)
+}
 
+// syncToCache fetches all open PRs from GitHub, writes them to the DB, and
+// purges any rows that are no longer open. Shared by runSync and runListTo.
+func syncToCache(db *cache.DB, cfg *config.Config, username string) error {
 	myPRs, _ := gh.SearchMyPRs()
 	repoSet := make(map[string]bool)
 	for _, pr := range myPRs {
@@ -97,46 +102,78 @@ func runSync() error {
 		repoSet[repo] = true
 	}
 
+	reviewPRs, _ := gh.SearchReviewRequests()
+	for _, pr := range reviewPRs {
+		if pr.Repository.NameWithOwner != "" {
+			repoSet[pr.Repository.NameWithOwner] = true
+		}
+	}
+
+	openKeys := make(map[string]bool)
 	synced := 0
 	for repo := range repoSet {
 		repoPRs, err := gh.ListPRsForRepo(repo)
 		if err != nil {
-			fmt.Printf("  ✗ %s: %v\n", repo, err)
+			fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", repo, err)
 			continue
 		}
 		for i := range repoPRs {
 			pr := &repoPRs[i]
 			section := classifyPR(pr, username)
 			db.UpsertPR(pr, repo, section)
+			openKeys[fmt.Sprintf("%s#%d", repo, pr.Number)] = true
 			synced++
 		}
-		fmt.Printf("  ✓ %s (%d PRs)\n", repo, len(repoPRs))
+		fmt.Fprintf(os.Stderr, "  ✓ %s (%d PRs)\n", repo, len(repoPRs))
 	}
 
-	reviewPRs, _ := gh.SearchReviewRequests()
 	for i := range reviewPRs {
 		pr := &reviewPRs[i]
-		db.UpsertPR(pr, pr.Repository.NameWithOwner, "review")
-		synced++
+		key := fmt.Sprintf("%s#%d", pr.Repository.NameWithOwner, pr.Number)
+		if !openKeys[key] {
+			db.UpsertPR(pr, pr.Repository.NameWithOwner, "review")
+			openKeys[key] = true
+			synced++
+		}
 	}
 
-	fmt.Printf("Sync complete: %d PRs cached across %d repos.\n", synced, len(repoSet))
+	db.PurgeClosedPRs(openKeys)
+	fmt.Fprintf(os.Stderr, "Sync complete: %d PRs cached across %d repos.\n", synced, len(repoSet))
 	return nil
 }
 
 // classifyPR determines which section a PR belongs in.
 func classifyPR(pr *gh.PR, username string) string {
 	if strings.EqualFold(pr.Author.Login, username) {
-		switch {
-		case pr.ReviewDecision == "CHANGES_REQUESTED":
-			return "do_now"
-		case pr.ReviewDecision == "APPROVED":
-			return "do_now"
-		case pr.Mergeable == "CONFLICTING":
-			return "do_now"
-		default:
+		if pr.IsDraft {
 			return "waiting"
 		}
+		if pr.ReviewDecision == "CHANGES_REQUESTED" {
+			return "do_now"
+		}
+		if pr.Mergeable == "CONFLICTING" {
+			return "do_now"
+		}
+		for _, check := range pr.StatusCheckRollup {
+			if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "ACTION_REQUIRED" {
+				return "do_now"
+			}
+		}
+		if pr.ReviewDecision == "APPROVED" {
+			ciOK := true
+			for _, check := range pr.StatusCheckRollup {
+				if check.Conclusion != "SUCCESS" && check.Conclusion != "NEUTRAL" &&
+					check.Conclusion != "SKIPPED" && check.Status != "COMPLETED" {
+					ciOK = false
+					break
+				}
+			}
+			if ciOK {
+				return "do_now"
+			}
+			return "waiting"
+		}
+		return "waiting"
 	}
 	return "review"
 }
@@ -276,17 +313,28 @@ func toJSONPRs(prs []cache.CachedPR) []jsonPR {
 
 // runListTo writes the PR list to w. When jsonMode is true it outputs JSON;
 // otherwise it writes human-readable plaintext.
+// It always syncs from GitHub first so the output is never stale.
 func runListTo(w io.Writer, jsonMode bool) error {
-	_, err := config.Load()
+	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("no config found, run 'prflow setup' first")
 	}
+	cfg.Validate()
 
 	db, err := cache.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open cache: %w", err)
 	}
 	defer db.Close()
+
+	// Always fetch live from GitHub so `prflow ls` is never reading stale cache.
+	if !jsonMode {
+		fmt.Fprintln(w, "Syncing with GitHub...")
+	}
+	username, _ := gh.CheckAuth()
+	if err := syncToCache(db, cfg, username); err != nil && !jsonMode {
+		fmt.Fprintf(w, "Warning: sync error: %v\n", err)
+	}
 
 	sections := []struct {
 		name string
